@@ -1,0 +1,55 @@
+=== TIMESTAMP ===
+2026-11-24T00:22:53+11:00
+=== BIOS 1.34.0 ATTRS ===
+ThermalManagement=Optimized
+TurboMode=Enabled
+Speedstep=Enabled
+CStatesCtrl=Enabled
+AdaptiveCStates=Enabled
+LogicProc=Enabled
+MultipleAtomCores=CoresAll
+PrimaryBattChargeCfg=PrimAcUse
+PeakShiftCfg=Disabled
+ForceLpmAspmOff=Disabled
+=== LSPCI ROOT PORT 00:01.0 (IDLE) ===
+00:01.0 PCI bridge: Intel Corporation Raptor Lake PCI Express 5.0 Graphics Port (PEG010) (prog-if 00 [Normal decode])
+		LnkCap:	Port #0, Speed 16GT/s, Width x8, ASPM not supported
+		LnkCtl:	ASPM Disabled; RCB 64 bytes, LnkDisable- CommClk+
+		LnkSta:	Speed 2.5GT/s, Width x8
+		LnkCtl2: Target Link Speed: 16GT/s, EnterCompliance- SpeedDis-
+=== LSPCI GPU 01:00.0 (IDLE) ===
+01:00.0 3D controller: NVIDIA Corporation AD106M [GeForce RTX 4070 Max-Q / Mobile] (rev a1)
+		LnkCap:	Port #0, Speed 16GT/s, Width x8, ASPM L1, Exit Latency L1 <16us
+		LnkCtl:	ASPM Disabled; RCB 64 bytes, LnkDisable- CommClk+
+		LnkSta:	Speed 2.5GT/s (downgraded), Width x8
+		LnkCtl2: Target Link Speed: 16GT/s, EnterCompliance- SpeedDis-
+=== IDLE MSRs (cpu0 P-core & cpu12 E-core, O_RDONLY) ===
+--- P-core cpu0 ---
+  0x1fc MSR_POWER_CTL                = 0x0000000000e4005b
+  0x19c IA32_THERM_STATUS            = 0x00000000883b2a80
+  0x1b1 IA32_PKG_THERM_STATUS        = 0x00000000882e0800
+  0x64f MSR_CORE_PERF_LIMIT_REASONS  = 0x000000001d020000
+--- E-core cpu12 ---
+  0x1fc MSR_POWER_CTL                = 0x0000000000e4005b
+  0x19c IA32_THERM_STATUS            = 0x0000000088350a80
+  0x1b1 IA32_PKG_THERM_STATUS        = 0x00000000882e0800
+  0x64f MSR_CORE_PERF_LIMIT_REASONS  = 0x000000001d020000
+=== DUMP & DECOMPILE ACPI TABLES ===
+Decompiled .dsl count: 17
+-rw-r--r-- 1 root root 4.4M Nov 24 00:22 /tmp/acpi-dump/DSDT.dsl
+-rw-r--r-- 1 root root 318K Nov 24 00:22 /tmp/acpi-dump/SSDT10.dsl
+-rw-r--r-- 1 root root  14K Nov 24 00:22 /tmp/acpi-dump/SSDT11.dsl
+-rw-r--r-- 1 root root 205K Nov 24 00:22 /tmp/acpi-dump/SSDT12.dsl
+-rw-r--r-- 1 root root  13K Nov 24 00:22 /tmp/acpi-dump/SSDT13.dsl
+-rw-r--r-- 1 root root  47K Nov 24 00:22 /tmp/acpi-dump/SSDT14.dsl
+-rw-r--r-- 1 root root  46K Nov 24 00:22 /tmp/acpi-dump/SSDT15.dsl
+-rw-r--r-- 1 root root 2.3K Nov 24 00:22 /tmp/acpi-dump/SSDT16.dsl
+-rw-r--r-- 1 root root 9.8K Nov 24 00:22 /tmp/acpi-dump/SSDT1.dsl
+-rw-r--r-- 1 root root 3.1K Nov 24 00:22 /tmp/acpi-dump/SSDT2.dsl
+-rw-r--r-- 1 root root 114K Nov 24 00:22 /tmp/acpi-dump/SSDT3.dsl
+-rw-r--r-- 1 root root 319K Nov 24 00:22 /tmp/acpi-dump/SSDT4.dsl
+-rw-r--r-- 1 root root    0 Nov 24 00:22 /tmp/acpi-dump/SSDT5.dsl
+-rw-r--r-- 1 root root  44K Nov 24 00:22 /tmp/acpi-dump/SSDT6.dsl
+-rw-r--r-- 1 root root 345K Nov 24 00:22 /tmp/acpi-dump/SSDT7.dsl
+-rw-r--r-- 1 root root  26K Nov 24 00:22 /tmp/acpi-dump/SSDT8.dsl
+-rw-r--r-- 1 root root  12K Nov 24 00:22 /tmp/acpi-dump/SSDT9.dsl

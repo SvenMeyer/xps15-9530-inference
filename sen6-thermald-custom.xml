@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<!-- Custom thermald configuration for Dell XPS 15 9530:
+     Preference=QUIET is required by thermald to enforce passive trips (does NOT change Dell BIOS profile).
+     Targets SEN6 (Charger Temperature Sensor QE10) via rapl_controller_mmio:
+     - Full 76W PL1 below 63C
+     - Clamps PL1_mmio to 22W at SEN6 >= 63C (hysteresis 1C -> restores at 62C)
+     Prevents the EC 65C / ~9W PECI PL1 cliff without Dell's 15W SEN5 clamp. -->
+<ThermalConfiguration>
+  <Platform>
+    <Name>Dell XPS 15 9530 SEN6 Charger-Aware Policy</Name>
+    <ProductName>*</ProductName>
+    <Preference>QUIET</Preference>
+    <ThermalZones>
+      <ThermalZone>
+        <Type>SEN6</Type>
+        <TripPoints>
+          <TripPoint>
+            <SensorType>SEN6</SensorType>
+            <Temperature>63000</Temperature>
+            <Hyst>1000</Hyst>
+            <type>passive</type>
+            <ControlType>PARALLEL</ControlType>
+            <CoolingDevice>
+              <index>1</index>
+              <type>rapl_controller_mmio</type>
+              <influence>100</influence>
+              <SamplingPeriod>2</SamplingPeriod>
+              <TargetState>22000000</TargetState>
+            </CoolingDevice>
+          </TripPoint>
+        </TripPoints>
+      </ThermalZone>
+    </ThermalZones>
+  </Platform>
+</ThermalConfiguration>
