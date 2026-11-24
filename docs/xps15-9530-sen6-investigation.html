@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chasing the 400 MHz Cliff: Reverse-Engineering Dell XPS 15 9530 Thermal Throttling on Linux</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface-2: #1c222b;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --accent-soft: rgba(88, 166, 255, 0.12);
+    --green: #3fb950;
+    --green-soft: rgba(63, 185, 80, 0.12);
+    --amber: #d29922;
+    --amber-soft: rgba(210, 153, 34, 0.12);
+    --red: #f85149;
+    --red-soft: rgba(248, 81, 73, 0.12);
+    --purple: #bc8cff;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 5rem;
+  }
+
+  /* Header / Hero */
+  header.hero {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 2rem;
+    margin-bottom: 2.5rem;
+  }
+  .eyebrow {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border: 1px solid rgba(88, 166, 255, 0.3);
+    padding: 0.25rem 0.65rem;
+    border-radius: 999px;
+    margin-bottom: 1rem;
+  }
+  h1 {
+    font-size: clamp(1.85rem, 4vw, 2.6rem);
+    line-height: 1.18;
+    margin: 0 0 1rem;
+    letter-spacing: -0.02em;
+  }
+  .subtitle {
+    font-size: 1.1rem;
+    color: var(--muted);
+    margin: 0 0 1.4rem;
+    max-width: 72ch;
+  }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem 1.4rem;
+    font-size: 0.88rem;
+    color: var(--muted);
+    font-family: var(--mono);
+  }
+  .meta span strong { color: var(--text); font-weight: 600; }
+
+  /* KPI Cards */
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
+    gap: 0.9rem;
+    margin: 2rem 0 2.5rem;
+  }
+  .kpi {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.05rem 1.15rem;
+  }
+  .kpi .label {
+    font-size: 0.76rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    font-family: var(--mono);
+  }
+  .kpi .val {
+    font-size: 1.65rem;
+    font-weight: 700;
+    margin: 0.3rem 0 0.2rem;
+    line-height: 1.15;
+  }
+  .kpi .sub {
+    font-size: 0.84rem;
+    color: var(--muted);
+  }
+  .kpi.good .val { color: var(--green); }
+  .kpi.blue .val { color: var(--accent); }
+  .kpi.amber .val { color: var(--amber); }
+
+  /* TOC */
+  nav.toc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.1rem 1.35rem;
+    margin-bottom: 2.5rem;
+  }
+  nav.toc h2 {
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin: 0 0 0.65rem;
+    border: 0;
+    padding: 0;
+    font-family: var(--mono);
+  }
+  nav.toc ol {
+    margin: 0;
+    padding-left: 1.25rem;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 0.3rem 1.5rem;
+  }
+  nav.toc a {
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 0.94rem;
+  }
+  nav.toc a:hover { text-decoration: underline; }
+
+  /* Typography */
+  h2 {
+    font-size: 1.55rem;
+    margin: 3rem 0 1rem;
+    padding-bottom: 0.45rem;
+    border-bottom: 1px solid var(--border);
+    letter-spacing: -0.015em;
+  }
+  h3 {
+    font-size: 1.15rem;
+    margin: 1.8rem 0 0.65rem;
+    color: #f0f6fc;
+  }
+  p { margin: 0 0 1.05rem; }
+  ul, ol { margin: 0 0 1.15rem; padding-left: 1.4rem; }
+  li { margin-bottom: 0.4rem; }
+  a { color: var(--accent); }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    padding: 0.12em 0.38em;
+    border-radius: 5px;
+    color: #c9d1d9;
+  }
+  pre {
+    background: #0a0e14;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.15rem;
+    overflow-x: auto;
+    margin: 1rem 0 1.35rem;
+    line-height: 1.5;
+  }
+  pre code {
+    background: none;
+    border: 0;
+    padding: 0;
+    font-size: 0.86rem;
+    color: #e6edf3;
+  }
+
+  /* Callouts */
+  .callout {
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    margin: 1.3rem 0 1.5rem;
+    border: 1px solid var(--border);
+    border-left-width: 4px;
+    background: var(--surface);
+  }
+  .callout .title {
+    font-weight: 700;
+    font-size: 0.92rem;
+    margin-bottom: 0.35rem;
+    font-family: var(--mono);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .callout.info { border-left-color: var(--accent); background: linear-gradient(90deg, var(--accent-soft), var(--surface) 38%); }
+  .callout.info .title { color: var(--accent); }
+  .callout.good { border-left-color: var(--green); background: linear-gradient(90deg, var(--green-soft), var(--surface) 38%); }
+  .callout.good .title { color: var(--green); }
+  .callout.warn { border-left-color: var(--amber); background: linear-gradient(90deg, var(--amber-soft), var(--surface) 38%); }
+  .callout.warn .title { color: var(--amber); }
+  .callout.danger { border-left-color: var(--red); background: linear-gradient(90deg, var(--red-soft), var(--surface) 38%); }
+  .callout.danger .title { color: var(--red); }
+
+  /* Tables */
+  .table-wrap {
+    overflow-x: auto;
+    margin: 1.2rem 0 1.6rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+    background: var(--surface);
+  }
+  th, td {
+    padding: 0.65rem 0.85rem;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    white-space: nowrap;
+  }
+  th {
+    background: var(--surface-2);
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 600;
+  }
+  tr:last-child td { border-bottom: 0; }
+  td.num, th.num { text-align: right; font-family: var(--mono); }
+  tr.highlight {
+    background: rgba(63, 185, 80, 0.11);
+  }
+  tr.highlight td { font-weight: 600; }
+  .badge {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    padding: 0.12rem 0.48rem;
+    border-radius: 999px;
+    font-weight: 600;
+  }
+  .badge.green { background: var(--green-soft); color: var(--green); border: 1px solid rgba(63,185,80,0.35); }
+  .badge.red { background: var(--red-soft); color: var(--red); border: 1px solid rgba(248,81,73,0.35); }
+  .badge.amber { background: var(--amber-soft); color: var(--amber); border: 1px solid rgba(210,153,34,0.35); }
+  .badge.blue { background: var(--accent-soft); color: var(--accent); border: 1px solid rgba(88,166,255,0.35); }
+
+  /* Figures / Charts */
+  figure {
+    margin: 1.5rem 0 2rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.15rem 1.25rem 0.95rem;
+  }
+  figcaption {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-top: 0.7rem;
+  }
+
+  /* Two-column cards */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+    gap: 1rem;
+    margin: 1.25rem 0 1.75rem;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.2rem 1.3rem;
+  }
+  .card h3 { margin-top: 0; font-size: 1.05rem; }
+
+  /* Timeline steps */
+  .step-list {
+    list-style: none;
+    padding: 0;
+    margin: 1.2rem 0 1.6rem;
+    border-left: 2px solid var(--border);
+    margin-left: 0.6rem;
+  }
+  .step-list li {
+    position: relative;
+    padding: 0 0 1.25rem 1.4rem;
+    margin: 0;
+  }
+  .step-list li::before {
+    content: "";
+    position: absolute;
+    left: -7px;
+    top: 0.45rem;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--bg);
+  }
+  .step-list li.twist::before { background: var(--amber); }
+  .step-list li.win::before { background: var(--green); }
+  .step-title {
+    font-weight: 700;
+    color: #f0f6fc;
+    margin-bottom: 0.25rem;
+  }
+
+  footer {
+    margin-top: 3.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.88rem;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <span class="eyebrow">Hardware &amp; Firmware Deep Dive &middot; v1.0.0</span>
+  <h1>Chasing the 400&nbsp;MHz Cliff: Reverse-Engineering Dell XPS&nbsp;15&nbsp;9530 Thermal Throttling Under Local LLM Inference</h1>
+  <p class="subtitle">
+    How a recurring 400&nbsp;MHz CPU + PCIe Gen&nbsp;1 stall cut sustained LLM decode speed nearly in half on Linux, how ACPI decompilation, live MSR captures, and clean-boot experiments ruled out <code>BD&nbsp;PROCHOT</code> and exposed Dell's two-stage EC fallback, and how a zero-risk power-envelope preset recovered <strong>+26.7%</strong> steady throughput while cutting heat by 20&nbsp;W.
+  </p>
+  <div class="meta">
+    <span><strong>Date:</strong> 2026-11-24</span>
+    <span><strong>Hardware:</strong> Dell XPS 15 9530 (i7-13700H &middot; RTX 4070 Laptop 8&nbsp;GB &middot; BIOS 1.34.0)</span>
+    <span><strong>Stack:</strong> Manjaro KDE &middot; Kernel 6.12 &rarr; 6.18.63 &middot; Strata 0.2.20 &middot; Qwen3.8-Flash-Next IQ3_S</span>
+  </div>
+</header>
+
+<div class="kpi-grid">
+  <div class="kpi good">
+    <div class="label">Steady Decode Gain</div>
+    <div class="val">+26.7%</div>
+    <div class="sub">16.06 &rarr; 20.35 t/s (clean boot)</div>
+  </div>
+  <div class="kpi good">
+    <div class="label">PCIe Gen 1 Stalls</div>
+    <div class="val">256 s &rarr; 0 s</div>
+    <div class="sub">100% eliminated over 8 rounds</div>
+  </div>
+  <div class="kpi blue">
+    <div class="label">400 MHz Brake Time</div>
+    <div class="val">42.4% &rarr; 0.3%</div>
+    <div class="sub">5 full brakes &rarr; 0 full brakes</div>
+  </div>
+  <div class="kpi amber">
+    <div class="label">Combined Load Power</div>
+    <div class="val">68.2 &rarr; 48.4 W</div>
+    <div class="sub">&minus;29% heat &middot; stock EC safety intact</div>
+  </div>
+</div>
+
+<nav class="toc" aria-label="Table of contents">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#problem">1. What Opus Initially Detected &amp; What It Cost</a></li>
+    <li><a href="#investigation">2. How We Investigated &amp; What We Actually Found</a></li>
+    <li><a href="#plot-twist">3. The Clean-Boot Plot Twist: EC Reg 0x32 &amp; the 2-Step Cliff</a></li>
+    <li><a href="#solution">4. The Safe Solution &amp; Benchmark Results</a></li>
+    <li><a href="#dont">5. Proven Dead Ends (What Not to Do)</a></li>
+    <li><a href="#further">6. Going Further: Two Paths to 25&ndash;30 t/s</a></li>
+  </ol>
+</nav>
+
+<!-- SECTION 1 -->
+<section id="problem">
+  <h2>1. What Opus Initially Detected &amp; What It Cost</h2>
+  <p>
+    While benchmarking <strong>Qwen3.8-Flash-Next</strong> (a 125B / 6B-active hybrid MoE running <code>GSQ-RCO IQ3_S</code> on the Strata 0.2.20 inference engine, 64k context, DFlash2 drafting), initial instrumentation by Opus&nbsp;5.5 revealed a dramatic sawtooth collapse during sustained generation:
+  </p>
+  <ul>
+    <li><strong>The symptom:</strong> Every ~2&nbsp;minutes of continuous token generation, all 14 CPU cores abruptly locked to <strong><code>400&nbsp;MHz</code></strong> for <strong>45&ndash;77&nbsp;seconds</strong>, while the RTX&nbsp;4070's PCIe link simultaneously dropped from <strong>PCIe Gen&nbsp;4 (16&nbsp;GT/s) to Gen&nbsp;1 (2.5&nbsp;GT/s)</strong>.</li>
+    <li><strong>The throughput cliff:</strong> Pre-brake decode ran smoothly at <strong>27&ndash;31&nbsp;t/s</strong>. During each stall, decode cratered to <strong>7&ndash;10&nbsp;t/s</strong>. Across a warm 6-round clean-boot baseline (<code>strata-throttle-trace-20261124-1849-1-balanced.jsonl</code>), the laptop spent <strong>42.4% of all generation seconds (261 / 616&nbsp;s) at 400&nbsp;MHz</strong> and <strong>256&nbsp;s at PCIe Gen&nbsp;1</strong>, dragging steady-state throughput down to <strong>16.06&nbsp;t/s</strong> (nearly half of peak speed).</li>
+    <li><strong>Early elimination:</strong> Opus proved this was <em>not</em> a Strata regression (0.2.11 and 0.2.20 tied at 28.5&ndash;29.1&nbsp;t/s unthrottled), <em>not</em> fixed by updating BIOS 1.13.0 &rarr; 1.34.0, and <em>not</em> CPU die overheating (one balanced trace logged 165&nbsp;s at 400&nbsp;MHz with just <strong>18&nbsp;ms</strong> of CPU package thermal throttling!).</li>
+    <li><strong>The prime suspect:</strong> Every single brake in the first 22 observed episodes began shortly after an unnamed ACPI board sensor &mdash; <strong><code>SEN6</code></strong> (read-only <code>hot = 65.05&nbsp;&deg;C</code>, <code>hysteresis = 4.00&nbsp;&deg;C</code>, <code>critical = 70.05&nbsp;&deg;C</code>) &mdash; hit <code>65.05&nbsp;&deg;C</code>, and every completed episode released cleanly at <strong><code>61.05&nbsp;&deg;C</code></strong>.</li>
+  </ul>
+
+  <div class="callout info">
+    <div class="title">Initial Working Theory vs. What Needed Proof</div>
+    The classic laptop lore for a 400&nbsp;MHz lock is external <strong><code>BD&nbsp;PROCHOT</code></strong> asserted by the Embedded Controller (EC) over an overheating VRM. Before changing a single register or power limit, we committed to proving <em>what</em> <code>SEN6</code> physically measures and <em>which silicon mechanism</em> actually forces 400&nbsp;MHz.
+  </div>
+</section>
+
+<!-- SECTION 2 -->
+<section id="investigation">
+  <h2>2. How We Investigated &amp; What We Actually Found</h2>
+  <p>
+    Using a strictly read-only diagnostic script (<code>sen6-diag-readonly.sh</code>), we dumped and decompiled the live ACPI tables (<code>iasl -d</code>), decoded Dell's compressed Intel DTT policy blob (<code>INTC10A0:00/data_vault</code>), and sampled Intel thermal/power MSRs, <code>turbostat</code>, and <code>lspci -vv</code> right across live brake transitions. Every classic assumption turned out to be wrong:
+  </p>
+
+  <ol class="step-list">
+    <li>
+      <div class="step-title">ACPI <code>SSDT4</code> (<code>DptfTabl</code>) identified <code>SEN6</code> &mdash; and cleared the VRMs</div>
+      <p>
+        Decompiling <code>SSDT4.aml</code> exposed Dell's human-readable <code>_STR</code> strings for every EC sensor channel. <code>SEN6</code> (EC channel <code>0x07</code>) is <strong><code>"Charger Temperature Sensor(QE10)"</code></strong> &mdash; near the USB-C power-delivery / charger stage, <em>not</em> the CPU/GPU VRM. Meanwhile, the actual VRM sensor <code>SEN9</code> (<code>"VR_GPU&amp;CPU(QE16)"</code>) peaked at just <strong>75&nbsp;&deg;C</strong> against a 94&nbsp;&deg;C hot limit. The ACPI table also showed <code>S7HP = 0x41</code> (65&nbsp;&deg;C) and <code>S7CC = 0x46</code> (70&nbsp;&deg;C) are static AML constants returned to the OS and never written back to the EC &mdash; proving an initrd ACPI SSDT override could never move the EC cutoff.
+      </p>
+    </li>
+
+    <li>
+      <div class="step-title">Live MSRs + <code>turbostat</code> ruled out <code>BD&nbsp;PROCHOT</code> completely</div>
+      <p>
+        Across 505 1&nbsp;Hz samples spanning two full brakes (<code>sen6-diag-brake.txt</code>) plus a static snapshot after earlier brakes, <strong>every single PROCHOT active and sticky log bit</strong> (<code>0x19C</code> b2/b3, <code>0x1B1</code> b2/b3, <code>0x64F</code> b0/b16) stayed <strong><code>0</code> for the entire boot</strong>. Instead, <strong>bit&nbsp;10 (<code>0x0400</code> &mdash; Package/Platform Power Limit PL1)</strong> flipped <code>0 &rarr; 1</code> simultaneously across <code>0x19C</code>, <code>0x1B1</code>, and <code>0x64F</code> in all 80/80 braked samples. Mid-brake <code>turbostat</code> logged <code>Bzy_MHz = 400</code>, <code>UncMHz = 400</code>, <code>PkgWatt = 9.18&nbsp;W</code>, <strong><code>PKG_% = 101.89%</code></strong> (RAPL throttling counter), <code>CoreThr = 0</code>, and <code>SMI = 0</code> &mdash; even while OS-visible MSR <code>0x610</code> and MMIO <code>0x59A0</code> still read <code>115&nbsp;W</code>. Conclusion: the 400&nbsp;MHz lock is a <strong>hidden firmware package power limit</strong> (strongly inferred to be an EC PECI RAPL PL1 domain limit), <em>not</em> <code>BD&nbsp;PROCHOT</code>.
+      </p>
+    </li>
+
+    <li>
+      <div class="step-title">PCIe Gen&nbsp;4 &rarr; Gen&nbsp;1 is firmware-commanded, not <code>pcie_aspm=force</code></div>
+      <p>
+        <code>lspci -vv</code> on root port <code>00:01.0</code> (<code>PEG010</code>) and GPU <code>01:00.0</code> confirmed ASPM is unsupported/disabled on both ends. Mid-brake, <code>00:01.0</code>'s <code>LnkCtl2: Target Link Speed</code> itself dropped from <code>16GT/s</code> to <code>2.5GT/s</code> 1&ndash;2&nbsp;s <em>after</em> the CPU hit 400&nbsp;MHz, with zero NVML hardware slowdown or power-brake flags (<code>0x08/0x40/0x80</code>) asserted.
+      </p>
+    </li>
+
+    <li>
+      <div class="step-title">Linux lacks Windows's Intel DTT policy &mdash; and Dell's <code>_OSC</code> handshake is one-way</div>
+      <p>
+        Decompressing the 2,956-byte <code>INTC10A0:00/data_vault</code> yielded 82,639&nbsp;bytes (217 ESIF keys) of Dell's Windows DPTF table. On Windows, Intel DTT smoothly caps CPU PL1 on <code>SKIN</code> (46&ndash;55&nbsp;&deg;C &rarr; 45&ndash;20&nbsp;W) and <code>SEN5</code> (62&nbsp;&deg;C &rarr; 15&nbsp;W) while setting <code>SEN6</code>'s Windows trip points higher (<code>_HOT = 70&nbsp;&deg;C</code>, <code>_CRT = 75&nbsp;&deg;C</code>). Crucially, inspecting <code>IETM._OSC</code> in <code>SSDT4</code> revealed that activating Intel DTT (or running Linux's stock <code>thermald --adaptive</code>) invokes <strong><code>ECDV.DPST(1)</code></strong>, which writes <code>1</code> to <strong>EC register <code>0x32</code></strong> (<code>EC_DPTF_STATE_ENABLE</code>) &mdash; and Dell's ACPI has <strong>no code path to ever write <code>0</code> back</strong>.
+      </p>
+    </li>
+  </ol>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Question</th>
+          <th>Common Assumption</th>
+          <th>Proven Fact on XPS 15 9530</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>What is <code>SEN6</code>?</td>
+          <td>CPU / GPU VRM hotspot</td>
+          <td><strong>Charger Temperature Sensor (QE10)</strong>; VRM <code>SEN9</code> stays cool (67&ndash;75&nbsp;&deg;C vs 94&nbsp;&deg;C hot)</td>
+        </tr>
+        <tr>
+          <td>What forces 400&nbsp;MHz?</td>
+          <td>External <code>BD&nbsp;PROCHOT</code></td>
+          <td><strong>Hidden PL1 power limit</strong> (<code>0x64F</code> b10 = 1, <code>PKG_% = 101.9%</code>, PROCHOT bits = 0 all boot)</td>
+        </tr>
+        <tr>
+          <td>Why PCIe Gen&nbsp;1?</td>
+          <td><code>pcie_aspm=force</code></td>
+          <td>Root port <code>00:01.0</code> <code>LnkCtl2</code> explicitly lowered to <code>2.5GT/s</code> 1&ndash;2&nbsp;s after CPU brake</td>
+        </tr>
+        <tr>
+          <td>Will <code>thermald --adaptive</code> fix it?</td>
+          <td>Matches Windows speed</td>
+          <td>Avoids the brake (<code>SEN6 &le; 62&nbsp;&deg;C</code>), but clamps CPU to <strong>15&nbsp;W</strong> on <code>SEN5</code> &rarr; <strong>17.24&nbsp;t/s</strong> steady &amp; latches <code>EC 0x32 = 1</code></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- SECTION 3 -->
+<section id="plot-twist">
+  <h2>3. The Clean-Boot Plot Twist: EC Reg 0x32 &amp; the Two-Stage Cliff</h2>
+  <p>
+    Our first custom <code>thermald</code> policy (<code>SEN6 &ge; 63&nbsp;&deg;C &rarr; 22&nbsp;W</code>, without <code>--adaptive</code>) initially looked like a home run: <strong>24.0&ndash;25.5&nbsp;t/s</strong> steady, 0&nbsp;s at 400&nbsp;MHz, <code>SEN6</code> peaking at <code>64.05&nbsp;&deg;C</code>. However, peer review caught a critical flaw: that 5.5-minute run had occurred <em>on the same boot</em> after our earlier <code>thermald --adaptive</code> test had already latched <code>EC reg 0x32 = 1</code>.
+  </p>
+  <p>
+    We refused to trust or install anything until we performed a <strong>full cold shutdown</strong> (power completely off) and re-verified from a clean boot (kernel <code>6.18.63-3-MANJARO</code>, NVIDIA <code>620.70.06</code>, live <code>SEN6 &ge; 68&nbsp;&deg;C</code> emergency kill-switch guard):
+  </p>
+
+  <ol class="step-list">
+    <li class="twist">
+      <div class="step-title">Cold shutdown restored the brake &mdash; and broke the <code>63&nbsp;&deg;C &rarr; 22&nbsp;W</code> policy</div>
+      <p>
+        A clean-boot unmitigated trace immediately reproduced 5/5 EC brakes (<code>SEN6 65.05 &rarr; 61.05&nbsp;&deg;C</code>, 16.06&nbsp;t/s steady), proving cold shutdown clears <code>EC reg 0x32</code>. When we then ran the <em>exact same</em> <code>63&nbsp;&deg;C &rarr; 22&nbsp;W</code> XML on that clean boot, it hit <strong>11 EC brakes in 15&nbsp;minutes</strong>. Cross-referencing <code>thermald</code>'s per-second RAPL package watt log revealed why: Intel's default RAPL PL1 averaging window is <strong>55.97&nbsp;seconds</strong> (<code>constraint_0_time_window_us = 55967744</code>). Waiting until <code>63.05&nbsp;&deg;C</code> meant the CPU kept drawing 32&ndash;40&nbsp;W for the entire 12&ndash;30&nbsp;s until the EC brake slammed it &mdash; and on a clean boot, all 11 brakes fired at <strong><code>SEN6 = 64.05&nbsp;&deg;C</code></strong>.
+      </p>
+    </li>
+
+    <li class="twist">
+      <div class="step-title">Moving the cap earlier caught Dell's 2-step EC fallback in slow motion</div>
+      <p>
+        We moved the cap early (<code>59&nbsp;&deg;C &rarr; 20&nbsp;W</code> passive + <code>63&nbsp;&deg;C &rarr; 17&nbsp;W</code> max) so the 56&nbsp;s RAPL window engaged well before <code>63&nbsp;&deg;C</code>. That kept <code>SEN6 &le; 63.05&nbsp;&deg;C</code> and held the CPU genuinely at <strong>17.0&nbsp;W</strong> &mdash; yet <strong>9 EC brakes still fired</strong>! Because the transition happened slowly, the trace caught Dell's clean-boot EC fallback stepping in two stages:
+      </p>
+      <pre><code>t+260..283s: SEN6=62-63C  SKIN=59.05C  CPU=17.0W (1700-1800 MHz)  GPU=33.5W  PCIe=Gen4
+t+286..309s: SEN6=62.05C  SKIN=59.05C  CPU=12.0W ( 500- 600 MHz)  GPU=25.0W  PCIe=Gen4  &lt;-- EC Stage 1 (12 W)
+t+351..375s: SEN6=62-63C  SKIN=59.05C  CPU= 9.3W (      400 MHz)  GPU=26.0W  PCIe=Gen1  &lt;-- EC Stage 2 (9.3 W + Gen 1)
+t+377s     : SEN6=61.05C  SKIN=59.05C  CPU=20.0W (     2200 MHz)  GPU=33.3W  PCIe=Gen4  &lt;-- Release at SEN6=61.05C</code></pre>
+      <p>
+        Across <strong>all 30 JSONL brakes</strong> recorded in this project, <strong>30/30</strong> began once <strong><code>SKIN</code> reached <code>59.05&ndash;60.05&nbsp;&deg;C</code></strong> (with <code>SEN6 = 62.05&ndash;66.05&nbsp;&deg;C</code>), and <strong>29/29</strong> completed brakes released at exactly <strong><code>SEN6 = 61.05&nbsp;&deg;C</code></strong>.
+      </p>
+    </li>
+
+    <li class="win">
+      <div class="step-title">The thermal bottleneck: GPU watts heat <code>SEN6</code> &gt;2&times; harder than CPU watts</div>
+      <p>
+        Opus's regression across traces fit <code>SEN6 &approx; 46.2 + 0.19 &times; CPU_W + 0.41 &times; GPU_W</code> (R&sup2;&nbsp;=&nbsp;0.87). With the RTX&nbsp;4070 pulling a full <code>34.5&nbsp;W</code>, even cutting CPU down to <code>17&nbsp;W</code> (<code>50.8&nbsp;W</code> total) still drove <code>SKIN</code> to <code>59.05&nbsp;&deg;C</code>. Breaking free on a clean boot (<code>EC reg 0x32 = 0</code>) required trimming GPU heat slightly so total chassis power stays below <strong>~48&ndash;49&nbsp;W</strong>.
+      </p>
+    </li>
+  </ol>
+</section>
+
+<!-- SECTION 4 -->
+<section id="solution">
+  <h2>4. The Safe Clean-Boot Solution &amp; Benchmark Results</h2>
+  <p>
+    While Dell's VBIOS blocks <code>nvidia-smi -pl</code> power limits on this RTX&nbsp;4070 Laptop, <code>nvidia-smi</code> supports both <strong>runtime graphics clock ceilings (<code>-lgc</code>)</strong> and <strong>runtime memory clock ceilings (<code>-lmc</code>)</strong>. We swept clean-boot combinations (all 8-round traces on kernel <code>6.18.63</code>, <code>EC reg 0x32 = 0</code>, no <code>thermald</code>):
+  </p>
+
+  <figure>
+    <svg viewBox="0 0 820 295" width="100%" height="auto" role="img" aria-label="Clean-boot steady decode throughput comparison">
+      <style>
+        .ax { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; fill: #8b949e; }
+        .lbl { font: 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #e6edf3; }
+        .lbl-b { font: 700 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #3fb950; }
+        .val { font: 700 12px ui-monospace, SFMono-Regular, Menlo, monospace; fill: #e6edf3; }
+        .sub { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; fill: #8b949e; }
+        .grid { stroke: #30363d; stroke-dasharray: 3,3; stroke-width: 1; }
+      </style>
+      <!-- Grid lines (x=275 is 0 t/s, scale = 18px per t/s -> 25 t/s = 450px -> x=725) -->
+      <line x1="275" y1="20" x2="275" y2="255" stroke="#30363d" stroke-width="1"/>
+      <line x1="365" y1="20" x2="365" y2="255" class="grid"/>
+      <line x1="455" y1="20" x2="455" y2="255" class="grid"/>
+      <line x1="545" y1="20" x2="545" y2="255" class="grid"/>
+      <line x1="635" y1="20" x2="635" y2="255" class="grid"/>
+      <line x1="725" y1="20" x2="725" y2="255" class="grid"/>
+
+      <text x="275" y="274" text-anchor="middle" class="ax">0</text>
+      <text x="365" y="274" text-anchor="middle" class="ax">5</text>
+      <text x="455" y="274" text-anchor="middle" class="ax">10</text>
+      <text x="545" y="274" text-anchor="middle" class="ax">15</text>
+      <text x="635" y="274" text-anchor="middle" class="ax">20</text>
+      <text x="725" y="274" text-anchor="middle" class="ax">25 t/s</text>
+
+      <!-- Row 1: Unmitigated 16.06 -->
+      <text x="265" y="45" text-anchor="end" class="lbl">Unmitigated balanced (68.2 W)</text>
+      <rect x="275" y="29" width="289" height="22" rx="4" fill="#f85149" opacity="0.85"/>
+      <text x="572" y="45" class="val">16.06 t/s</text>
+      <text x="648" y="45" class="sub">42.4% braked</text>
+
+      <!-- Row 2: CPU-only 20W/17W 15.4 -->
+      <text x="265" y="84" text-anchor="end" class="lbl">CPU-only 20W/17W (50.8 W)</text>
+      <rect x="275" y="68" width="277" height="22" rx="4" fill="#d29922" opacity="0.82"/>
+      <text x="560" y="84" class="val">15.40 t/s</text>
+      <text x="636" y="84" class="sub">27.0% braked</text>
+
+      <!-- Row 3: A2 GPU<=960 CPU=22W 17.99 -->
+      <text x="265" y="123" text-anchor="end" class="lbl">GPU&le;960 &middot; CPU 22W (49.5 W)</text>
+      <rect x="275" y="107" width="324" height="22" rx="4" fill="#58a6ff" opacity="0.72"/>
+      <text x="607" y="123" class="val">17.99 t/s</text>
+      <text x="683" y="123" class="sub">19.8% braked</text>
+
+      <!-- Row 4: A4 perf fans 18.45 -->
+      <text x="265" y="162" text-anchor="end" class="lbl">GPU&le;960 &middot; 22W &middot; Perf fans (50.0 W)</text>
+      <rect x="275" y="146" width="332" height="22" rx="4" fill="#58a6ff" opacity="0.82"/>
+      <text x="615" y="162" class="val">18.45 t/s</text>
+      <text x="691" y="162" class="sub">19.0% braked</text>
+
+      <!-- Row 5: A1 GPU<=1200 CPU=22W 18.54 -->
+      <text x="265" y="201" text-anchor="end" class="lbl">GPU&le;1200 &middot; CPU 22W (50.8 W)</text>
+      <rect x="275" y="185" width="334" height="22" rx="4" fill="#58a6ff" opacity="0.92"/>
+      <text x="617" y="201" class="val">18.54 t/s</text>
+      <text x="693" y="201" class="sub">18.9% braked</text>
+
+      <!-- Row 6: Winner A3 20.35 -->
+      <text x="265" y="240" text-anchor="end" class="lbl-b">GPU&le;1200 &middot; VRAM&le;5501 &middot; 24W (48.4 W)</text>
+      <rect x="275" y="224" width="366" height="24" rx="4" fill="#3fb950"/>
+      <text x="649" y="241" class="val" style="fill:#3fb950">20.35 t/s</text>
+      <text x="725" y="241" class="sub" style="fill:#3fb950">0.3% (0 Gen1)</text>
+    </svg>
+    <figcaption>
+      <strong>Figure 1:</strong> Steady-state decode speed (rounds 4&ndash;8; baseline rounds 3&ndash;6) on a verified clean cold boot (<code>EC reg 0x32 = 0</code>), Qwen3.8-Flash-Next <code>IQ3_S</code>, Strata 0.2.20, lifted ~2&nbsp;cm, ~25&nbsp;&deg;C ambient.
+    </figcaption>
+  </figure>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Clean-Boot Config (<code>EC 0x32 = 0</code>)</th>
+          <th class="num">CPU + GPU</th>
+          <th class="num">Total</th>
+          <th>GPU Clocks</th>
+          <th class="num"><code>&le;500&nbsp;MHz</code></th>
+          <th class="num">PCIe Gen&nbsp;1</th>
+          <th class="num">Steady t/s</th>
+          <th>Verdict</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Unmitigated <code>balanced</code> (<code>1849</code>)</td>
+          <td class="num">33.7 + 34.5 W</td>
+          <td class="num">68.2 W</td>
+          <td><code>1485 / 7001</code></td>
+          <td class="num">42.4%</td>
+          <td class="num">256 s</td>
+          <td class="num">16.06</td>
+          <td><span class="badge red">Baseline</span></td>
+        </tr>
+        <tr>
+          <td><code>thermald</code> <code>59C&rarr;20W / 63C&rarr;17W</code> (<code>2013</code>)</td>
+          <td class="num">17.0 + 33.8 W</td>
+          <td class="num">50.8 W</td>
+          <td><code>1485 / 7001</code></td>
+          <td class="num">27.0%</td>
+          <td class="num">214 s</td>
+          <td class="num">15.40</td>
+          <td><span class="badge red">Still brakes</span></td>
+        </tr>
+        <tr>
+          <td>A1: <code>GPU&le;1200</code> + <code>CPU 22W</code> (<code>2042</code>)</td>
+          <td class="num">22.1 + 28.7 W</td>
+          <td class="num">50.8 W</td>
+          <td><code>1200 / 7001</code></td>
+          <td class="num">18.9%</td>
+          <td class="num">133 s</td>
+          <td class="num">18.54</td>
+          <td><span class="badge amber">Short brakes</span></td>
+        </tr>
+        <tr>
+          <td>A2: <code>GPU&le;960</code> + <code>CPU 22W</code> (<code>2059</code>)</td>
+          <td class="num">22.1 + 27.4 W</td>
+          <td class="num">49.5 W</td>
+          <td><code>960 / 7001</code></td>
+          <td class="num">19.8%</td>
+          <td class="num">148 s</td>
+          <td class="num">17.99</td>
+          <td><span class="badge amber">Voltage floor</span></td>
+        </tr>
+        <tr>
+          <td>A4: <code>GPU&le;960</code> + <code>22W</code> + Perf fans (<code>2117</code>)</td>
+          <td class="num">22.0 + 28.0 W</td>
+          <td class="num">50.0 W</td>
+          <td><code>960 / 7001</code></td>
+          <td class="num">19.0%</td>
+          <td class="num">138 s</td>
+          <td class="num">18.45</td>
+          <td><span class="badge amber">+400 RPM</span></td>
+        </tr>
+        <tr class="highlight">
+          <td>A3: <code>GPU&le;1200</code> &middot; <code>VRAM&le;5501</code> &middot; <code>CPU 24W</code> (<code>2141</code>)</td>
+          <td class="num">24.0 + 24.4 W</td>
+          <td class="num">48.4 W</td>
+          <td><code>1200 / 5501</code></td>
+          <td class="num">0.3%</td>
+          <td class="num">0 s</td>
+          <td class="num">20.35</td>
+          <td><span class="badge green">Winner (+26.7%)</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Why Option A3 Works &amp; How to Use It Daily</h3>
+  <p>
+    Dropping GPU core clock alone hit the RTX&nbsp;4070's voltage floor around 1000&nbsp;MHz (<code>28.7&nbsp;W &rarr; 27.4&nbsp;W</code>), because the <code>7001&nbsp;MHz</code> GDDR6 array drew the bulk of the remaining power. Stepping VRAM down one P-state to <code>5501&nbsp;MHz</code> shaved another ~4&ndash;5&nbsp;W off the hottest contributor to <code>SEN6</code> and <code>SKIN</code> (dropping GPU draw to <strong>24.4&nbsp;W</strong>), giving enough thermal room to raise CPU PL1 to <strong>24&nbsp;W</strong> and run smoothly at <strong>20.35&nbsp;t/s steady</strong> (<strong>20.62&nbsp;t/s</strong> overall across 8 rounds) with <strong>zero full EC brakes</strong> and <strong>zero PCIe Gen&nbsp;1 drops</strong>.
+  </p>
+  <p>
+    Even better for an out-of-warranty laptop: total continuous draw drops from <code>68.2&nbsp;W</code> to <strong><code>48.4&nbsp;W</code></strong> (&minus;29% heat load), <code>thermald</code> stays disabled, nothing is modified in <code>/etc</code>, and Dell's stock hardware protection remains 100% intact.
+  </p>
+
+  <div class="callout good">
+    <div class="title">One-Command On-Demand Preset (Zero Persistent Changes)</div>
+    <pre><code># Start before a long Strata / local-LLM session (defaults: GPU&le;1200 MHz, VRAM&le;5501 MHz, CPU=24 W)
+sudo /home/sum/Downloads/AI-Runtime/sen6-test-gpu-cpu-cap.sh
+
+# Press Ctrl-C when done (or reboot) -&gt; automatically runs nvidia-smi -rgc / -rmc and restores PL1 = 115 W</code></pre>
+    <p style="margin-bottom:0">
+      On hotter ambient days (&gt;28&nbsp;&deg;C), pass <code>1200 22 0 5501</code> for an extra 2&nbsp;W of thermal headroom.
+    </p>
+  </div>
+</section>
+
+<!-- SECTION 5 -->
+<section id="dont">
+  <h2>5. Proven Dead Ends (What Not to Do)</h2>
+  <div class="callout danger">
+    <div class="title">Save Yourself Time &amp; Hardware Risk</div>
+    <ul style="margin-bottom:0">
+      <li><strong>Do NOT disable <code>BD&nbsp;PROCHOT</code> (<code>wrmsr 0x1FC</code> bit&nbsp;0):</strong> Proven 0% effective here (<code>PROCHOT</code> never asserted across 505 live samples) and removes real emergency protection.</li>
+      <li><strong>Do NOT patch <code>SSDT4</code> <code>_HOT</code> via initrd ACPI override:</strong> <code>S7HP = 0x41</code> is never sent back to the EC; changing it only changes what Linux prints.</li>
+      <li><strong>Do NOT tear down the heatsink to re-pad VRMs expecting to fix <code>SEN6</code>:</strong> <code>SEN9</code> (<code>VR_GPU&amp;CPU</code>) runs at a comfortable 67&ndash;75&nbsp;&deg;C against a 94&nbsp;&deg;C hot limit.</li>
+      <li><strong>Do NOT enable Manjaro's stock <code>thermald.service</code> (<code>--adaptive</code>) by hand:</strong> It clamps CPU to 15&nbsp;W on <code>SEN5</code> (17.24&nbsp;t/s) and latches <code>EC reg 0x32 = 1</code> until cold shutdown.</li>
+      <li><strong>Do NOT install CPU-only <code>thermald</code> expecting clean-boot brake elimination:</strong> Without <code>DPST(1)</code>, 34&nbsp;W GPU draw alone still pushes <code>SKIN</code> to 59.05&nbsp;&deg;C and triggers the EC fallback.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- SECTION 6 -->
+<section id="further">
+  <h2>6. Going Further: Two Paths to 25&ndash;30&nbsp;t/s (If Needed Later)</h2>
+  <p>
+    Our clean-boot ceiling (~20.4&nbsp;t/s at 48.4&nbsp;W) reflects the XPS&nbsp;15&nbsp;9530's passive chassis cooling limit under Dell's conservative no-DPTF EC fallback. Sustaining <strong>28&ndash;30&nbsp;t/s</strong> physically requires <strong>~65&ndash;68&nbsp;W</strong>. Because we chose hardware longevity over running an out-of-warranty thin-and-light laptop at its thermal redline, we stopped at the safe 48.4&nbsp;W preset &mdash; but two clear upgrade paths are documented and ready if ever needed:
+  </p>
+
+  <div class="card-grid">
+    <div class="card">
+      <h3>Option 1 &middot; Active Underside Cooling <span class="badge green">Safest &rarr; ~28&ndash;30 t/s</span></h3>
+      <p>
+        Pointing high-static-pressure airflow under the chassis (e.g., an IETS GT500 / Llano-style sealed-foam cooler pad, or even a desk fan aimed underneath the lifted laptop) directly cools the bottom skin (<code>SKIN</code>) and charger area (<code>SEN6 / QE10</code>).
+      </p>
+      <p>
+        Shaving just <strong>4&ndash;6&nbsp;&deg;C</strong> off <code>SKIN</code> and <code>SEN6</code> unlocks the full <code>68&nbsp;W</code> stock envelope (<code>28&ndash;30&nbsp;t/s</code> sustained) with <strong>zero software hacks</strong>, <code>EC reg 0x32 = 0</code> untouched, and 100% stock hardware protection.
+      </p>
+      <p style="margin-bottom:0; color:var(--muted); font-size:0.86rem;">
+        Test with no <code>sudo</code>: <code>TRACE_ROUNDS=8 bash &lt;(sed 's/^ARMS=.*/ARMS="balanced"/' strata-throttle-trace.sh)</code>
+      </p>
+    </div>
+
+    <div class="card">
+      <h3>Option 2 &middot; Windows-Style <code>DPST(1)</code> + Custom <code>thermald</code> <span class="badge amber">Software &rarr; ~25&ndash;28 t/s</span></h3>
+      <p>
+        Mirrors Windows Intel DTT: perform the one-way <code>_OSC</code> &rarr; <code>DPST(1)</code> handoff (<code>EC reg 0x32 = 1</code>) to disable the legacy 62&ndash;65&nbsp;&deg;C EC brake, then run a custom <code>thermald</code> curve (<code>59&nbsp;&deg;C &rarr; 22&ndash;26&nbsp;W</code> passive + <code>66&nbsp;&deg;C &rarr; 15&nbsp;W</code> max backstop) keeping <code>SEN6 &le; 65&ndash;66&nbsp;&deg;C</code> (below Dell's own Windows GDDV limits of <code>_HOT = 70&nbsp;&deg;C</code> / <code>_CRT = 75&nbsp;&deg;C</code>).
+      </p>
+      <p style="margin-bottom:0; color:var(--muted); font-size:0.86rem;">
+        <strong>Trade-off:</strong> Relies on software + an external <code>SEN6 &ge; 68&nbsp;&deg;C</code> kill-switch guard rather than the EC legacy brake until cold shutdown; runs the charger circuit warmer (~64&ndash;66&nbsp;&deg;C).
+      </p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <p style="margin:0 0 0.5rem;">
+    <strong>Repository &amp; Raw Artifacts (<code>xps15-sen6-research</code>):</strong>
+    <a href="../2026-11-24_handover_neon.md">2026-11-24 Handover &amp; Pickup Guide</a> &middot;
+    <a href="../2026-11-23-xps15-sen6-research-result-neon.md">Full Technical Report (Neon)</a> &middot;
+    <a href="../2026-11-23-xps15-sen6-research-result-opus-5.5.md">Independent Report &amp; Peer Review (Opus 5.5)</a> &middot;
+    <a href="../2026-11-23-xps15-sen6-throttle-evidence.md">Initial Evidence Log</a> &middot;
+    <a href="../sen6-test-gpu-cpu-cap.sh"><code>sen6-test-gpu-cpu-cap.sh</code></a>
+  </p>
+  <p style="margin:0;">
+    Published as <strong>v1.0.0</strong> on 2026-11-24. All diagnostic captures, ACPI excerpts, and JSONL traces in this repository were hygiene-checked (disk/LUKS UUIDs, serial numbers, and raw debug logs excluded).
+  </p>
+</footer>
+
+</div>
+</body>
+</html>
