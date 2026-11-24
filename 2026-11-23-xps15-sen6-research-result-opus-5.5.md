@@ -91,7 +91,7 @@ Both Grok and my first pass named external PROCHOT#, and the register captures h
 
 ### Neon's report
 
-Neon's captures are the most useful evidence so far. Its main findings hold, but several "100% proven" labels go further than the data.
+Neon's captures are the most useful evidence so far. Its main findings hold, but several "100% proven" labels went further than the data. Neon's revision (`a89c2b0`) fixed the write-scope, Ctrl-C, PECI, 22 W and charger-temperature points. The table records the original claims.
 
 | Neon's claim | Check | Result |
 |---|---|---|
@@ -130,18 +130,34 @@ Write steps, **not run by me and not to be run until the user decides**:
 
 ## 6. Safe diagnostic plan
 
-1. **Shut down fully rather than restarting.** Avoid heavy loads before this.
-2. **Check that the brake is back.** Run `strata-throttle-trace.sh`, optionally with `msr-watch.py` in a second terminal. A brake at SEN6 65 C means the flag was cleared. No brake means it survived the shutdown, and the laptop should not run long heavy loads until that is resolved.
-3. **Test the policy on that clean boot** (option 2), and do not run `--adaptive` first. A pass means no brake and SEN6 below 65 C for the whole soak.
-4. **Cold-start check:** leave the laptop off for an hour, boot, and read all zones at once. A SEN6 several degrees above its neighbours suggests a sensor offset.
+1. **Shut down fully rather than restarting.** Avoid heavy loads before this. Whether a shutdown clears the EC flag is unverified, because the EC can stay powered from the battery.
+2. **Start a temperature guard in its own terminal.** It only reads SEN6, and stops Strata at 68 C, just above the 67.05 C peak in the baseline traces:
 
-`msr-watch.py` has been tested only against fake register files. Its verdict will read "neither" for this brake, because it tests only for PROCHOT and CPU thermal limits. Use its logged 0x64F values.
+       Z=$(grep -lx SEN6 /sys/class/thermal/thermal_zone*/type | xargs dirname); while sleep 1; do T=$(( $(cat $Z/temp)/1000 )); echo -ne "\rSEN6 $T C "; if (( T >= 68 )); then ~/.local/bin/strata launch --stop </dev/null; echo STOPPED; break; fi; done
+
+3. **Check that the brake is back, using the balanced arm only.** The full trace includes a performance arm. If the brake were still off, the power fit puts SEN6 near 69 C at median power and 72 C at the 90th percentile, past the 70 C critical trip that Linux only logs.
+
+       cd ~/Downloads/AI-Runtime
+       TRACE_ROUNDS=6 bash <(sed 's/^ARMS=.*/ARMS="balanced"/' strata-throttle-trace.sh)
+
+   A drop to 400 MHz at SEN6 65 C means the flag was cleared. If there is no brake, stop long heavy loads.
+4. **Soak the policy on that clean boot, without `--adaptive`.** `sen6-test-thermald.sh` ends after 720 s and its exit trap then stops thermald, so a longer soak would silently lose the cap at 12 minutes. Extend it first. This edit is low risk, and `git checkout -- sen6-test-thermald.sh` undoes it.
+
+       sed -i 's/t0 < 720/t0 < 2400/' sen6-test-thermald.sh
+       sudo ./sen6-test-thermald.sh custom          # terminal 1, Ctrl+C after the trace ends
+       TRACE_ROUNDS=22 bash <(sed 's/^ARMS=.*/ARMS="balanced"/' strata-throttle-trace.sh)   # terminal 2, about 31 min
+
+   A pass means no brake and SEN6 below 65 C for the whole run. Keep the guard running.
+5. **Cold-start check:** leave the laptop off for an hour, boot, and read all zones at once. A SEN6 several degrees above its neighbours suggests a sensor offset.
+
+`msr-watch.py` has been tested only against fake register files. Its verdict will read "neither" for this brake, because it tests only for PROCHOT and CPU thermal limits. Use its logged 0x64F values. The guard was tested with its stop action stubbed out.
 
 ## 7. Do not do this
 
 - Do not run long heavy loads on the current boot, because the 65 C brake may be off.
 - Do not run `thermald --adaptive` again, or anything else that calls `_OSC`, before the clean-boot test.
-- Do not enable `thermald.service` until the policy passes a soak on a clean boot.
+- Do not enable `thermald.service` until the policy passes a soak on a clean boot. The stock unit runs `--adaptive`, so enable it only through `sen6-install-thermald.sh`, whose override removes that flag.
+- Do not run the full three-arm trace until the brake is confirmed back.
 - Do not clear BD PROCHOT (MSR 0x1FC bit 0). It is not the mechanism.
 - Do not write EC registers or use EC-access tools.
 - Do not override the SSDT or edit firmware to raise the SEN6 trip.
@@ -182,4 +198,5 @@ Anecdotes:
 - **2026-11-23:** first pass. Decoded the data vault, replayed the 22 brakes against Dell's policy, and wrote the read-only logger and static check.
 - **2026-11-24:** compared with Grok's report and checked its claims. Found the thermald `_OSC` handshake, confirmed the packaged 2.5.13 handles this CPU and vault, and added the GPU-link timing.
 - **2026-11-24 (later):** read the user's static check, then checked Neon's report and walkthrough against the raw captures. PROCHOT is ruled out, SEN6 is the charger sensor, and the `_OSC` flag is one-way and may disable the brake. The BIOS settings are unchanged. `msr-watch.py` was not run, because Neon's capture covers the same registers.
+- **2026-11-24 (review of Neon's revision):** its corrections are accurate. Confirmed that custom mode does not call `_OSC`: the log has no "Set Default UUID" line, and all 516 telemetry samples read `INVALID`. The install script's override correctly removes the stock `--adaptive` flag. Found two plan problems: the test script stops thermald at 12 minutes, and the brake check used a trace with a performance arm. Section 6 now covers both.
 - **Pending:** full power-off and brake check, clean-boot policy soak, cold-start check.

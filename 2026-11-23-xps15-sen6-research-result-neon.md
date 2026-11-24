@@ -264,3 +264,38 @@ All runs used the identical standardized Strata balanced workload (`IQ3_S`, `64k
 ### Independent Reviews & Community Anecdotes
 13. **Notebookcheck — Dell XPS 15 9530 (RTX 4070) Review** *(independent measurement: 40–50 W TGP cap)*: https://www.notebookcheck.net/Dell-XPS-15-9530-RTX-4070-laptop-review-Both-impressive-and-underwhelming.709131.0.html
 14. **Community / Forum Anecdotes *(explicitly labeled as anecdotes)*:** Reddit (`r/Dell`, `r/DellXPS`) and Dell Community reports of XPS 15 9520/9530 & Precision 5570/5680 400 MHz throttling under mixed load / WD22TB4 130 W dock heating / flat-desk airflow; `intel/thermal_daemon` issues (`#293`, `#484`).
+
+---
+
+## 9. Addendum (2026-11-24 Evening — Clean-Boot Verification & Thermal Ceiling Map)
+
+After a **full cold shutdown** and Manjaro update to kernel **`6.18.63-3-MANJARO`** + NVIDIA **`620.70.06`** (`gpu_unlock` active, `thermald` disabled, `INTC10A0:00/uuids/current_uuid = INVALID`, `EC reg 0x32 = 0`), we ran six controlled clean-boot traces with a live `SEN6 >= 68 °C` auto-stop guard. These tests resolved every remaining open question and **overturned** the earlier assumption that CPU-only `22 W` capping at `SEN6 = 63 °C` suffices on a clean boot:
+
+### Key Verified Clean-Boot Findings (`EC reg 0x32 = 0`)
+1. **Full cold shutdown clears `EC reg 0x32`:** Baseline unmitigated `balanced` (`strata-throttle-trace-20261124-1849-1-balanced.jsonl`) immediately reproduced **5/5 EC brakes** at `SEN6 = 65.05 °C → 61.05 °C` (`261/616 s = 42.4%` braked, `256 s` PCIe Gen 1, **`16.06 t/s`** steady R3–R6, `18.96 t/s` overall R1–R6; unbraked `33.7 W` CPU + `34.5 W` GPU = `68.2 W`).
+2. **`63 °C → 22 W` failed on clean boot (11 brakes in 15 min):** Archived in `sen6-thermald-custom22w-cleanboot-fail-telemetry.txt`. Cross-referencing `thermald`'s per-second RAPL `Pkg` power log proved two root causes:
+   - Intel's **`55.97 s` RAPL PL1 time window** (`constraint_0_time_window_us = 55967744`) meant waiting until `SEN6 = 63.05 °C` allowed CPU power to stay at `32–40 W` (`64F_b10 = 0`) until the EC brake slammed it to `9.3 W / 400 MHz`.
+   - All 11 brakes fired at **`SEN6 = 64.05 °C`** (never reaching `65 °C`), proving that the earlier `01:18` `22 W` run only survived `202 s` at `SEN6 = 64.05 °C` because `EC reg 0x32` was still latched to `1` from `--adaptive`.
+3. **Discovery of Dell's 2-step clean-boot EC fallback (`12 W` → `9.3 W + PCIe Gen 1`) triggered at `SKIN >= 59.05 °C` + `SEN6 >= 62–63 °C`:**
+   - Moving the cap early (`59 °C → 20 W` passive + `63 °C → 17 W` max, `strata-throttle-trace-20261124-2013-1-balanced.jsonl`) held `SEN6 <= 63.05 °C` and CPU genuinely at `17.0 W`, **yet still triggered 9 EC brakes** (`27.0%` braked, `15.4 t/s` steady) once `SKIN` reached `59.05 °C` (because the GPU still drew `33.8 W`, `50.8 W` combined).
+   - Caught in slow motion: the EC first clamped CPU to **`12.0 W` (`500–600 MHz`, still PCIe Gen 4)**, then escalated to **`9.3 W` (`400 MHz`) + PCIe Gen 1**.
+   - Across **all 30 JSONL brakes** recorded across every trace: **30/30** started at `SKIN = 59.05–60.05 °C` (`SEN6 = 62.05–66.05 °C`) and **29/29** completed brakes released at exactly **`SEN6 = 61.05 °C`** (even while `SKIN` stayed `59.05 °C`).
+4. **GPU power-limit vs clock-locking & the clean-boot `~48 W` ceiling:**
+   - `nvidia-smi -pl` is locked by VBIOS (`Changing power management limit is not supported`), but **`nvidia-smi -lgc`** (core clock ceiling) and **`nvidia-smi -lmc`** (memory clock ceiling, `Runtime` switching) are both supported.
+   - Because GPU heats `SEN6` >2× as strongly per watt as CPU (`0.41` vs `0.19 °C/W`), trimming GPU clocks (`-lgc 210,1200` + `-lmc 405,5501`, dropping GPU from `34.5 W → 24.4 W`) while setting CPU `PL1 = 24 W` (`48.4 W` total) eliminated all full EC brakes and all PCIe Gen 1 drops on a 100% clean boot (`EC reg 0x32 = 0`).
+
+### Complete 2026-11-24 Clean-Boot Matrix (`EC reg 0x32 = 0`, Kernel `6.18.63`, NVIDIA `620.70.06`)
+
+| Run / Trace | CPU + GPU W | Total W | GPU Clocks | Fans (RPM) | `SEN6` / `SKIN` Max | `<=500 MHz` % | PCIe Gen 1 | Steady t/s |
+|---|---:|---:|---|---|---|---:|---:|---:|
+| Unmitigated `balanced` (`1849`) | `33.7 + 34.5 W` | `68.2 W` | `1485 / 7001` | `5900 / 5600` | `65.05 / 60.05 °C` | `42.4%` | `256 s` | `16.06 t/s` |
+| `59C→20W / 63C→17W` (`2013`) | `17.0 + 33.8 W` | `50.8 W` | `1485 / 7001` | `5900 / 5600` | `63.05 / 59.05 °C` | `27.0%` | `214 s` | `15.4 t/s` |
+| A1: `GPU<=1200`, `CPU=22W` (`2042`) | `22.1 + 28.7 W` | `50.8 W` | `1200 / 7001` | `5900 / 5600` | `63.05 / 59.05 °C` | `18.9%` | `133 s` | `18.54 t/s` |
+| A2: `GPU<=960`, `CPU=22W` (`2059`) | `22.1 + 27.4 W` | `49.5 W` | `960 / 7001` | `5900 / 5600` | `63.05 / 59.05 °C` | `19.8%` | `148 s` | `17.99 t/s` |
+| A4: `GPU<=960`, `CPU=22W`, `perf` (`2117`) | `22.0 + 28.0 W` | `50.0 W` | `960 / 7001` | `6291 / 6003` | `63.05 / 59.05 °C` | `19.0%` | `138 s` | `18.45 t/s` |
+| **A3: `GPU<=1200`, `VRAM<=5501`, `CPU=24W` (`2141`)** | **`24.0 + 24.4 W`** | **`48.4 W`** | **`1200 / 5501`** | **`5900 / 5600`** | **`63.05 / 60.05 °C`** | **`0.3%`** | **`0 s`** | **`20.35 t/s`** |
+
+### Final Decision (2026-11-24)
+- **Do NOT install `thermald` (`sen6-install-thermald.sh`)** — system remains cleanly at stock defaults (`thermald` disabled, `EC reg 0x32 = 0`, `PL1 = 115 W`, stock GPU clocks).
+- **Recommended safe on-demand preset (hardware-longevity priority):** Run `sudo /home/sum/Downloads/AI-Runtime/sen6-test-gpu-cpu-cap.sh` during long inference sessions (`1200 / 5501 MHz` GPU + `24 W` CPU → `48.4 W` total, **`20.35 t/s` steady**, `0` full EC brakes, `0 s` PCIe Gen 1, full stock EC protection untouched; `Ctrl-C` restores stock clocks & `115 W`).
+- **Full pickup guide** (including future Option 1 active underside cooling and Option 2 Windows-style `DPST(1)` handoff): [2026-11-24_handover_neon.md](file:///home/sum/Downloads/AI-Runtime/2026-11-24_handover_neon.md).

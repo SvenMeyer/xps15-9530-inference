@@ -1,10 +1,15 @@
 <?xml version="1.0"?>
-<!-- Custom thermald configuration for Dell XPS 15 9530:
-     Preference=QUIET is required by thermald to enforce passive trips (does NOT change Dell BIOS profile).
-     Targets SEN6 (Charger Temperature Sensor QE10) via rapl_controller_mmio:
-     - Full 76W PL1 below 63C
-     - Clamps PL1_mmio to 22W at SEN6 >= 63C (hysteresis 1C -> restores at 62C)
-     Prevents the EC 65C / ~9W PECI PL1 cliff without Dell's 15W SEN5 clamp. -->
+<!-- EXPERIMENTAL custom thermald configuration for Dell XPS 15 9530:
+     WARNING (2026-11-24 clean-boot verification):
+     On a clean cold boot (EC reg 0x32 = 0, no _OSC/DPST(1)), CPU-only RAPL capping alone
+     (even 20W at 59C / 17W at 63C) does NOT prevent Dell's legacy EC fallback brake when
+     the RTX 4070 runs at full 34W, because SKIN still hits 59.05C and triggers the EC's
+     2-step 12W -> 9.3W/400MHz + PCIe Gen 1 brake at SEN6 = 62-63C.
+     - Do NOT install this via sen6-install-thermald.sh expecting brake-free clean-boot runs.
+     - For safe clean-boot inference (EC reg 0x32 = 0), use sen6-test-gpu-cpu-cap.sh instead
+       (defaults: GPU<=1200MHz, VRAM<=5501MHz, CPU=24W -> 48.4W total, 20.35 t/s, 0 full brakes).
+     - Keep this XML only as a reference for future Option 2 (DPST(1) / Windows-style handoff)
+       or combined airflow testing. See 2026-11-24_handover_neon.md. -->
 <ThermalConfiguration>
   <Platform>
     <Name>Dell XPS 15 9530 SEN6 Charger-Aware Policy</Name>
@@ -16,7 +21,7 @@
         <TripPoints>
           <TripPoint>
             <SensorType>SEN6</SensorType>
-            <Temperature>63000</Temperature>
+            <Temperature>59000</Temperature>
             <Hyst>1000</Hyst>
             <type>passive</type>
             <ControlType>PARALLEL</ControlType>
@@ -25,7 +30,21 @@
               <type>rapl_controller_mmio</type>
               <influence>100</influence>
               <SamplingPeriod>2</SamplingPeriod>
-              <TargetState>22000000</TargetState>
+              <TargetState>20000000</TargetState>
+            </CoolingDevice>
+          </TripPoint>
+          <TripPoint>
+            <SensorType>SEN6</SensorType>
+            <Temperature>63000</Temperature>
+            <Hyst>1000</Hyst>
+            <type>max</type>
+            <ControlType>PARALLEL</ControlType>
+            <CoolingDevice>
+              <index>1</index>
+              <type>rapl_controller_mmio</type>
+              <influence>100</influence>
+              <SamplingPeriod>2</SamplingPeriod>
+              <TargetState>17000000</TargetState>
             </CoolingDevice>
           </TripPoint>
         </TripPoints>

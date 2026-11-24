@@ -3,18 +3,23 @@
 # Does NOT enable thermald.service; restores saved RAPL PL1 on exit/Ctrl-C.
 #
 # Usage:
-#   sudo /home/sum/Downloads/AI-Runtime/sen6-test-thermald.sh adaptive
-#   sudo /home/sum/Downloads/AI-Runtime/sen6-test-thermald.sh custom
+#   sudo /home/sum/Downloads/AI-Runtime/sen6-test-thermald.sh adaptive [max_secs]
+#   sudo /home/sum/Downloads/AI-Runtime/sen6-test-thermald.sh custom [max_secs]
 set -uo pipefail
 
 if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-  echo "Please run as root: sudo $0 [adaptive|custom]" >&2
+  echo "Please run as root: sudo $0 [adaptive|custom] [max_secs]" >&2
   exit 1
 fi
 
 MODE="${1:-adaptive}"
+MAX_SECS="${2:-3600}"
 if [[ "$MODE" != "adaptive" && "$MODE" != "custom" ]]; then
-  echo "Usage: sudo $0 [adaptive|custom]" >&2
+  echo "Usage: sudo $0 [adaptive|custom] [max_secs]" >&2
+  exit 1
+fi
+if ! [[ "$MAX_SECS" =~ ^[0-9]+$ ]] || (( MAX_SECS < 60 )); then
+  echo "Invalid max_secs: $MAX_SECS (must be integer >= 60)" >&2
   exit 1
 fi
 
@@ -83,31 +88,39 @@ chmod a+r "$LOG_OUT" 2>/dev/null || true
 echo ">>> thermald running (PID $THD_PID). First 20 log lines:"
 head -n 20 "$LOG_OUT"
 echo ""
-echo ">>> READY FOR STRATA BENCH — logging telemetry to $TEL_OUT (Ctrl-C when Strata run finishes, max 12 min)..."
+echo ">>> READY FOR STRATA BENCH — logging telemetry to $TEL_OUT (Ctrl-C when Strata run finishes, max ${MAX_SECS}s)..."
 
-/usr/bin/python3 - "$TEL_OUT" <<'PY'
-import os, struct, sys, time
+/usr/bin/python3 - "$TEL_OUT" "$MAX_SECS" <<'PY'
+import glob, os, struct, sys, time
 
 out = sys.argv[1]
+max_secs = int(sys.argv[2])
 fd0 = os.open("/dev/cpu/0/msr", os.O_RDONLY)
 def r_msr(reg): return struct.unpack("<Q", os.pread(fd0, 8, reg))[0]
 def rf(p):
     try: return open(p).read().strip()
     except Exception: return ""
 def rtemp(p):
+    if not p: return -1.0
     v = rf(p)
     return int(v) / 1000.0 if v.lstrip("-").isdigit() else -1.0
 def rwatt(p):
     v = rf(p)
     return int(v) / 1e6 if v.isdigit() else -1.0
 
+zmap = {}
+for z in sorted(glob.glob("/sys/class/thermal/thermal_zone*")):
+    zt = rf(z + "/type")
+    if zt:
+        zmap[zt] = z + "/temp"
+
 t0 = time.time()
 with open(out, "w") as f:
-    while time.time() - t0 < 720:
+    while time.time() - t0 < max_secs:
         ts = time.strftime("%H:%M:%S")
-        sen6 = rtemp("/sys/class/thermal/thermal_zone6/temp")
-        sen5 = rtemp("/sys/class/thermal/thermal_zone5/temp")
-        skin = rtemp("/sys/class/thermal/thermal_zone0/temp")
+        sen6 = rtemp(zmap.get("SEN6", ""))
+        sen5 = rtemp(zmap.get("SEN5", ""))
+        skin = rtemp(zmap.get("SKIN", ""))
         mhz = int(rf("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq") or "0") // 1000
         pl1_msr = rwatt("/sys/class/powercap/intel-rapl:0/constraint_0_power_limit_uw")
         pl1_mmio = rwatt("/sys/class/powercap/intel-rapl-mmio:0/constraint_0_power_limit_uw")
